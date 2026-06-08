@@ -522,17 +522,17 @@ class ImageBgWidget(QWidget):
         self.update()
 
     def setPixmapFromBase64(self, b64_data, ext="png"):
-        """从 base64 数据加载图片（用于导出代码）"""
-        from io import BytesIO
+        """从 base64 加载图片"""
         try:
-            img_data = base64.b64decode(b64_data)
+            img_data = base64.b64decode(b64_data.encode() if isinstance(b64_data, str) else b64_data)
             pix = QPixmap()
-            pix.loadFromData(img_data, ext.upper())
-            self._pixmap = pix
-            self._image_path = ""
-            self.update()
+            ok = pix.loadFromData(img_data, ext.upper())
+            if ok:
+                self._pixmap = pix
+                self._image_path = ""
+                self.update()
         except Exception:
-            pass
+            pass  # 图片数据损坏时静默忽略，控件显示默认底色
 
     def set_scale_mode(self, mode):
         if mode in ("fit", "stretch", "tile", "center"):
@@ -2062,36 +2062,39 @@ class CodeGenerator:
         if tag_bindings:
             lines.extend(CodeGenerator._generate_data_binder(tag_bindings)); lines.append("")
         _resize_fn = "setFixedSize" if getattr(canvas, "_fixed_canvas", False) else "resize"
-        lines.extend(["class GeneratedWindow(QMainWindow):","    def __init__(self):","        super().__init__()",'        self.setWindowTitle("Generated Application")',f"        self.{_resize_fn}({canvas.design_width}, {canvas.design_height})","",
+        # 多页面：窗口宽度需加上侧边导航栏宽度，否则控件会被裁切
+        nav_w = getattr(canvas, '_nav_width', 140)
+        win_w = canvas.design_width + (nav_w if multi_page else 0)
+        lines.extend(["class GeneratedWindow(QMainWindow):","    def __init__(self):","        super().__init__()",'        self.setWindowTitle("Generated Application")',f"        self.{_resize_fn}({win_w}, {canvas.design_height})","",
             f"        qss_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '{qss_filename}')","        if os.path.exists(qss_path):","            with open(qss_path, 'r', encoding='utf-8') as f:","                QApplication.instance().setStyleSheet(f.read())",""])
+        # 🖼️ 画布背景图 — 单页/多页共用
+        bg_path = getattr(canvas, '_canvas_bg_path', '') or ''
+        if bg_path and os.path.exists(bg_path):
+            try:
+                for i, line in enumerate(lines):
+                    if line.startswith("from PySide6.QtWidgets import ("):
+                        lines.insert(i+1, "from PySide6.QtGui import QPixmap, QPainter, QColor")
+                        break
+                with open(bg_path, "rb") as f:
+                    bg_b64 = base64.b64encode(f.read()).decode()
+                ext = os.path.splitext(bg_path)[1].lstrip('.') or 'png'
+                lines.append('        # 画布背景图')
+                lines.append(f'        _bg_data = base64.b64decode("{bg_b64}")')
+                lines.append(f'        _bg_pix = QPixmap()')
+                lines.append(f'        _bg_pix.loadFromData(_bg_data, "{ext.upper()}")')
+                bg_mode = getattr(canvas, '_canvas_bg_scale', 'fit')
+                bg_op = getattr(canvas, '_canvas_bg_opacity', 100)
+                lines.append(f'        self._bg_pixmap = _bg_pix')
+                lines.append(f'        self._bg_scale = "{bg_mode}"')
+                lines.append(f'        self._bg_opacity = {bg_op}')
+            except Exception:
+                pass
+
         obj_name_map = {}
         if multi_page:
             CodeGenerator._emit_multipage(canvas, lines, tag_bindings, obj_name_map)
         else:
             lines += ["        self.central_widget = QWidget()","        self.setCentralWidget(self.central_widget)",""]
-            # 🖼️ 画布背景图
-            bg_path = getattr(canvas, '_canvas_bg_path', '') or ''
-            if bg_path and os.path.exists(bg_path):
-                try:
-                    # 补充 QtGui import
-                    for i, line in enumerate(lines):
-                        if line.startswith("from PySide6.QtWidgets import ("):
-                            lines.insert(i+1, "from PySide6.QtGui import QPixmap, QPainter, QColor")
-                            break
-                    with open(bg_path, "rb") as f:
-                        bg_b64 = base64.b64encode(f.read()).decode()
-                    ext = os.path.splitext(bg_path)[1].lstrip('.') or 'png'
-                    lines.append(f'        # 画布背景图')
-                    lines.append(f'        _bg_data = base64.b64decode("{bg_b64}")')
-                    lines.append(f'        _bg_pix = QPixmap()')
-                    lines.append(f'        _bg_pix.loadFromData(_bg_data, "{ext.upper()}")')
-                    bg_mode = getattr(canvas, '_canvas_bg_scale', 'fit')
-                    bg_op = getattr(canvas, '_canvas_bg_opacity', 100)
-                    lines.append(f'        self._bg_pixmap = _bg_pix')
-                    lines.append(f'        self._bg_scale = "{bg_mode}"')
-                    lines.append(f'        self._bg_opacity = {bg_op}')
-                except Exception:
-                    pass
             used = {}
             for w in canvas._canvas_widgets:
                 if w.property("_designer_hidden"): continue
@@ -2335,16 +2338,17 @@ class ImageBgWidget(QWidget):
         self.update()
 
     def setPixmapFromBase64(self, b64_data, ext="png"):
-        from io import BytesIO
+        """从 base64 加载图片"""
         try:
-            img_data = base64.b64decode(b64_data)
+            img_data = base64.b64decode(b64_data.encode() if isinstance(b64_data, str) else b64_data)
             pix = QPixmap()
-            pix.loadFromData(img_data, ext.upper())
-            self._pixmap = pix
-            self._image_path = ""
-            self.update()
+            ok = pix.loadFromData(img_data, ext.upper())
+            if ok:
+                self._pixmap = pix
+                self._image_path = ""
+                self.update()
         except Exception:
-            pass
+            pass  # 图片数据损坏时静默忽略，控件显示默认底色
 
     def set_scale_mode(self, mode):
         if mode in ("fit", "stretch", "tile", "center"):
@@ -2430,7 +2434,13 @@ class ImageBgWidget(QWidget):
         """多页面应用：生成 QStackedWidget + 侧边栏导航"""
         pages = canvas._pages
         page_names = [p["name"] for p in pages]
-        btn_width = 120
+        # 📐 导航栏样式（从画布属性读取，可定制）
+        nb = getattr(canvas, '_nav_bg', '#2c3e50')
+        nt = getattr(canvas, '_nav_text', '#ecf0f1')
+        na = getattr(canvas, '_nav_active', '#4A90D9')
+        nh = getattr(canvas, '_nav_hover', '#34495e')
+        nw = getattr(canvas, '_nav_width', 140)
+        btn_pad = nw - 20  # 按钮宽度
         lines += [
             "        # ── 多页面布局 ──",
             "        self.central_widget = QWidget()",
@@ -2441,8 +2451,8 @@ class ImageBgWidget(QWidget):
             "",
             f"        # 侧边导航栏",
             "        self.nav_widget = QWidget()",
-            f"        self.nav_widget.setFixedWidth({btn_width + 20})",
-            "        self.nav_widget.setStyleSheet('QWidget{background:#2c3e50;}')",
+            f"        self.nav_widget.setFixedWidth({nw})",
+            f"        self.nav_widget.setStyleSheet('QWidget{{background:{nb};}}')",
             "        nav_layout = QVBoxLayout(self.nav_widget)",
             "        nav_layout.setContentsMargins(4, 8, 4, 8)",
             "        nav_layout.setSpacing(4)",
@@ -2456,8 +2466,8 @@ class ImageBgWidget(QWidget):
             lines += [
                 f"        btn_{safe_name} = QPushButton('{_esc(pname)}')",
                 f"        btn_{safe_name}.setFixedHeight(36)",
-                f"        btn_{safe_name}.setStyleSheet('QPushButton{{color:#ecf0f1;background:transparent;border:none;text-align:left;padding:8px 12px;font-size:12px;border-radius:4px;}}"
-                "QPushButton:hover{{background:#34495e;}}QPushButton:checked{{background:#4A90D9;font-weight:bold;}}')",
+                f"        btn_{safe_name}.setStyleSheet('QPushButton{{color:{nt};background:transparent;border:none;text-align:left;padding:8px 12px;font-size:12px;border-radius:4px;}}"
+                f"QPushButton:hover{{background:{nh};}}QPushButton:checked{{background:{na};font-weight:bold;}}')",
                 f"        btn_{safe_name}.setCheckable(True)",
                 f"        btn_{safe_name}.clicked.connect(lambda checked, idx={i}: self.stack.setCurrentIndex(idx))",
                 f"        nav_layout.addWidget(btn_{safe_name})",
@@ -2614,7 +2624,7 @@ class ImageBgWidget(QWidget):
 
         # 🖼️ 图片背景框 — 专用导出
         if cls == "ImageBgWidget" and hasattr(w, "_content_layout"):
-            ly_cls = type(w._content_layout).__name__; ly_var = f"ly_{var}"
+            ly_var = f"ly_{var}"
             lines.append(f"{indent}# ── ImageBg: {var} ──")
             img_path = getattr(w, '_image_path', '') or ''
             b64_data = ""
@@ -2631,7 +2641,6 @@ class ImageBgWidget(QWidget):
             lines.append(f"{indent}self.{var}.setGeometry({g.x()}, {g.y()}, {g.width()}, {g.height()})")
             if b64_data:
                 ext = os.path.splitext(img_path)[1].lstrip('.') if img_path else 'png'
-                lines.append(f'{indent}from io import BytesIO')
                 lines.append(f'{indent}self.{var}.setPixmapFromBase64("{b64_data}", "{ext}")')
             lines.append(f'{indent}self.{var}.set_scale_mode("{scale_mode}")')
             lines.append(f'{indent}self.{var}.set_opacity({opacity})')
@@ -2643,7 +2652,8 @@ class ImageBgWidget(QWidget):
             if tag: lines.append(f'{indent}self.{var}.setProperty("_tag", "{tag}")')
             ss = w.styleSheet()
             if ss: lines.append(f'{indent}self.{var}.setStyleSheet("{_esc(ss)}")')
-            lines.append(f"{indent}self.{ly_var} = {ly_cls}(self.{var})")
+            # ImageBgWidget.__init__ 已创建 _content_layout，直接引用
+            lines.append(f"{indent}self.{ly_var} = self.{var}._content_layout")
             lines.append(f"{indent}self.{ly_var}.setContentsMargins(8, 8, 8, 8)")
             lines.append(f"{indent}self.{ly_var}.setSpacing(4)"); lines.append("")
             for i in range(w._content_layout.count()):
@@ -2743,10 +2753,10 @@ class ImageBgWidget(QWidget):
 
         # 🖼️ 图片背景框在布局中
         if cls == "ImageBgWidget" and hasattr(w, "_content_layout"):
-            ly_cls = type(w._content_layout).__name__; ly_var = f"ly_{var}"
+            ly_var = f"ly_{var}"
             lines.append(f"{indent}# ── ImageBg: {var} ──")
             lines.append(f"{indent}self.{var} = ImageBgWidget()")
-            lines.append(f"{indent}self.{ly_var} = {ly_cls}(self.{var})")
+            lines.append(f"{indent}self.{ly_var} = self.{var}._content_layout")
             lines.append(f"{indent}self.{ly_var}.setContentsMargins(8, 8, 8, 8)")
             lines.append(f"{indent}self.{ly_var}.setSpacing(4)")
             role = w.property("role") or "default"
@@ -2894,6 +2904,12 @@ class DesignerCanvas(QWidget):
         self._preview_mode = False
         self._fixed_canvas = False
         self._preview_btn = None
+        # 📐 多页面导航栏样式配置
+        self._nav_bg = "#2c3e50"
+        self._nav_text = "#ecf0f1"
+        self._nav_active = "#4A90D9"
+        self._nav_hover = "#34495e"
+        self._nav_width = 140
         self.design_width = DESIGN_WIDTH
         self.design_height = DESIGN_HEIGHT
         # 多页面支持
@@ -2919,6 +2935,22 @@ class DesignerCanvas(QWidget):
         self._canvas_bg_pixmap = None
         self._canvas_bg_scale = "fit"   # fit / stretch / tile / center
         self._canvas_bg_opacity = 100
+        # 📐 画布拖拽缩放把手（右下角）
+        self._resize_grip_size = 16
+        self._resize_grip = QFrame(self)
+        self._resize_grip.setFixedSize(self._resize_grip_size, self._resize_grip_size)
+        self._resize_grip.setCursor(Qt.SizeFDiagCursor)
+        self._resize_grip.setStyleSheet("background:rgba(74,144,217,0.6);border:1px solid rgba(255,255,255,0.8);border-radius:2px;")
+        self._resize_grip._is_canvas_resize = True
+        self._resize_grip.installEventFilter(self)
+        self._resize_dragging = False
+        self._resize_drag_start = QPoint()
+        self._resize_drag_initial_size = QSize()
+        # 🏷 拖拽时显示的尺寸标签
+        self._resize_label = QLabel(self)
+        self._resize_label.setAlignment(Qt.AlignCenter)
+        self._resize_label.setStyleSheet("background:rgba(0,0,0,0.75);color:#fff;font-size:11px;padding:2px 8px;border-radius:3px;")
+        self._resize_label.setVisible(False)
         QShortcut(QKeySequence.Delete, self).activated.connect(self._delete_selected)
         QShortcut(QKeySequence("Ctrl+Z"), self).activated.connect(self.undo)
         QShortcut(QKeySequence("Ctrl+Y"), self).activated.connect(self.redo)
@@ -2927,6 +2959,8 @@ class DesignerCanvas(QWidget):
         QShortcut(QKeySequence("Ctrl+D"), self).activated.connect(self._duplicate_selected)
         QShortcut(QKeySequence("F5"), self).activated.connect(self._toggle_preview_shortcut)
         QShortcut(QKeySequence(Qt.Key_Up), self).activated.connect(lambda: self._arrow_move(0, -ARROW_STEP))
+        # 初始定位缩放把手
+        QTimer.singleShot(0, lambda: self._position_resize_grip())
         QShortcut(QKeySequence(Qt.Key_Down), self).activated.connect(lambda: self._arrow_move(0, ARROW_STEP))
         QShortcut(QKeySequence(Qt.Key_Left), self).activated.connect(lambda: self._arrow_move(-ARROW_STEP, 0))
         QShortcut(QKeySequence(Qt.Key_Right), self).activated.connect(lambda: self._arrow_move(ARROW_STEP, 0))
@@ -2958,6 +2992,23 @@ class DesignerCanvas(QWidget):
         self._canvas_bg_pixmap = None
         self.update()
 
+    def _position_resize_grip(self):
+        """定位缩放把手到画布右下角"""
+        if hasattr(self, '_resize_grip') and self._resize_grip:
+            self._resize_grip.move(self.width() - self._resize_grip_size - 2,
+                                    self.height() - self._resize_grip_size - 2)
+            self._resize_grip.raise_()
+
+    def _update_resize_label(self):
+        """更新缩放拖拽时的尺寸标签位置和文字"""
+        if hasattr(self, '_resize_label') and self._resize_label:
+            w, h = self.design_width, self.design_height
+            self._resize_label.setText(f"  {w} × {h}  ")
+            self._resize_label.adjustSize()
+            # 放在把手旁边
+            self._resize_label.move(self.width() - self._resize_label.width() - 20,
+                                     self.height() - self._resize_grip_size - 30)
+
     def _toggle_grid(self):
         self._grid_enabled = not self._grid_enabled
         self.update()
@@ -2974,6 +3025,11 @@ class DesignerCanvas(QWidget):
         self._preview_mode = True
         self._deselect()
         for h in self._handles.values(): h.setVisible(False)
+        # 隐藏缩放把手
+        if hasattr(self, '_resize_grip') and self._resize_grip:
+            self._resize_grip.setVisible(False)
+        if hasattr(self, '_resize_label') and self._resize_label:
+            self._resize_label.setVisible(False)
         # 让所有控件可交互，启动曲线实时滚动
         for w in self._canvas_widgets:
             w.setAttribute(Qt.WA_TransparentForMouseEvents, False)
@@ -3019,6 +3075,11 @@ class DesignerCanvas(QWidget):
         if hasattr(win, "btn_preview"):
             win.btn_preview.setChecked(False)
             win.btn_preview.setText("🔍 预览")
+        # 恢复缩放把手
+        if hasattr(self, '_resize_grip') and self._resize_grip:
+            self._resize_grip.setVisible(True)
+            self._resize_grip.move(self.width() - self._resize_grip_size - 2,
+                                    self.height() - self._resize_grip_size - 2)
 
     # ── 多页面管理 ──
     def page_count(self): return len(self._pages)
@@ -3113,6 +3174,10 @@ class DesignerCanvas(QWidget):
     def resizeEvent(self, e):
         super().resizeEvent(e); ph = self._placeholder; ph.move((self.width()-ph.width())//2, (self.height()-ph.height())//2)
         if self._preview_btn: self._preview_btn.move(self.width() - 140, 8)
+        # 📐 重定位缩放把手
+        if hasattr(self, '_resize_grip') and self._resize_grip:
+            self._resize_grip.move(self.width() - self._resize_grip_size - 2,
+                                    self.height() - self._resize_grip_size - 2)
         self._grid_cache = None
 
     def wheelEvent(self, event):
@@ -3836,6 +3901,12 @@ class DesignerCanvas(QWidget):
                 "canvas_bg_path": self._canvas_bg_path,
                 "canvas_bg_scale": self._canvas_bg_scale,
                 "canvas_bg_opacity": self._canvas_bg_opacity,
+                # 📐 导航栏样式
+                "nav_bg": self._nav_bg,
+                "nav_text": self._nav_text,
+                "nav_active": self._nav_active,
+                "nav_hover": self._nav_hover,
+                "nav_width": self._nav_width,
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -3870,6 +3941,10 @@ class DesignerCanvas(QWidget):
                 self.set_canvas_background(raw["canvas_bg_path"])
                 self._canvas_bg_scale = raw.get("canvas_bg_scale", "fit")
                 self._canvas_bg_opacity = raw.get("canvas_bg_opacity", 100)
+            # 📐 恢复导航栏样式
+            for k in ("nav_bg", "nav_text", "nav_active", "nav_hover", "nav_width"):
+                if k in raw:
+                    setattr(self, f"_{k}", raw[k])
             pages_data = raw.get("pages", [])
             if pages_data:
                 self._pages = []
@@ -4205,6 +4280,37 @@ class DesignerCanvas(QWidget):
                 return False
             return super().eventFilter(obj, event)
         et = event.type()
+
+        # 📐 画布缩放把手拖拽
+        if getattr(obj, '_is_canvas_resize', False):
+            if et == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._resize_dragging = True
+                self._resize_drag_start = self.mapFromGlobal(obj.mapToGlobal(event.position().toPoint()))
+                self._resize_drag_initial_size = QSize(self.design_width, self.design_height)
+                self._resize_label.setVisible(True)
+                self._update_resize_label()
+                return True
+            if et == QEvent.MouseMove and self._resize_dragging:
+                cur = self.mapFromGlobal(obj.mapToGlobal(event.position().toPoint()))
+                dx = cur.x() - self._resize_drag_start.x()
+                dy = cur.y() - self._resize_drag_start.y()
+                new_w = max(200, self._resize_drag_initial_size.width() + dx)
+                new_h = max(200, self._resize_drag_initial_size.height() + dy)
+                if self._grid_enabled:
+                    new_w = max(200, self._snap_to_grid(new_w))
+                    new_h = max(200, self._snap_to_grid(new_h))
+                self.set_canvas_size(new_w, new_h)
+                self._update_resize_label()
+                return True
+            if et == QEvent.MouseButtonRelease and self._resize_dragging:
+                self._resize_dragging = False
+                self._resize_label.setVisible(False)
+                self.widget_modified.emit()
+                win = self.window()
+                if hasattr(win, "statusBar"):
+                    win.statusBar().showMessage(f"📐 画布尺寸: {self.design_width}×{self.design_height}")
+                return True
+
         if et == QEvent.Wheel and event.modifiers() & Qt.ControlModifier:
             delta = event.angleDelta().y()
             if delta > 0: self._zoom_factor = min(2.0, self._zoom_factor + 0.1)
@@ -4993,6 +5099,7 @@ class DesignerMainWindow(QMainWindow):
         self.btn_theme = self._add_tb_btn2(self.toolbar_row2, "🎨 主题", BUTTON_STYLE)
         self.btn_ui_class = self._add_tb_btn2(self.toolbar_row2, "🪟 独立窗口", BUTTON_STYLE); self.btn_ui_class.setCheckable(True)
         self.btn_fixed = self._add_tb_btn2(self.toolbar_row2, "🔒 固定画布", BUTTON_STYLE); self.btn_fixed.setCheckable(True)
+        self.btn_nav = self._add_tb_btn2(self.toolbar_row2, "🧭 导航栏", BUTTON_STYLE)
         self.toolbar_row2.addSeparator()
         self.btn_save = self._add_tb_btn2(self.toolbar_row2, "💾 保存", BUTTON_STYLE)
         self.btn_load = self._add_tb_btn2(self.toolbar_row2, "📂 打开", BUTTON_STYLE)
@@ -5110,6 +5217,7 @@ class DesignerMainWindow(QMainWindow):
         self.btn_load.clicked.connect(self._load_project)
         self.btn_ui_class.toggled.connect(self._toggle_ui_class_mode)
         self.btn_fixed.toggled.connect(self._toggle_fixed_canvas)
+        self.btn_nav.clicked.connect(self._open_nav_settings)
         self.btn_custom.clicked.connect(self._load_custom_widgets)
         self.btn_theme.clicked.connect(self._open_theme_editor)
         self.btn_template.clicked.connect(self._show_template_menu)
@@ -5569,13 +5677,76 @@ class DesignerMainWindow(QMainWindow):
                 "border-radius:4px;} "
                 "QToolButton:hover{background:#D68910;}"
             )
-            self.statusBar().showMessage("✅ 画布已固定 — 生成 setFixedSize()")
+            # 隐藏缩放把手
+            if hasattr(self.canvas, '_resize_grip') and self.canvas._resize_grip:
+                self.canvas._resize_grip.setVisible(False)
+            self.statusBar().showMessage("✅ 画布已固定 — 禁止拖拽缩放 | 生成 setFixedSize()")
         else:
             self.btn_fixed.setText("🔓 可缩放")
             self.btn_fixed.setStyleSheet(
                 "QToolButton{padding:5px 10px;font-size:12px;}"
             )
-            self.statusBar().showMessage("✅ 画布可缩放 — 生成 resize()")
+            # 显示缩放把手
+            if hasattr(self.canvas, '_resize_grip') and self.canvas._resize_grip:
+                self.canvas._resize_grip.setVisible(True)
+                self.canvas._position_resize_grip()
+            self.statusBar().showMessage("✅ 画布可缩放 — 拖拽右下角把手 | 生成 resize()")
+
+    def _open_nav_settings(self):
+        """打开多页面导航栏样式设置对话框"""
+        c = self.canvas
+        dlg = QDialog(self)
+        dlg.setWindowTitle("🧭 多页面导航栏设置")
+        dlg.setMinimumWidth(420)
+        root_ly = QVBoxLayout(dlg)
+
+        # ── 自定义属性（先定义，供预设按钮引用） ──
+        w_bg = QLineEdit(getattr(c, '_nav_bg', '#2c3e50'))
+        w_text = QLineEdit(getattr(c, '_nav_text', '#ecf0f1'))
+        w_active = QLineEdit(getattr(c, '_nav_active', '#4A90D9'))
+        w_hover = QLineEdit(getattr(c, '_nav_hover', '#34495e'))
+        w_width = QSpinBox(); w_width.setRange(100, 300); w_width.setValue(getattr(c, '_nav_width', 140))
+
+        # ── 预设方案 ──
+        presets_grp = QGroupBox("📦 预设方案（点击应用）")
+        pr_ly = QHBoxLayout(presets_grp)
+        presets = [
+            ("🌙 暗夜蓝", "#2c3e50", "#ecf0f1", "#4A90D9", "#34495e", 140),
+            ("🌑 深黑", "#1a1a2e", "#aaaacc", "#E74C3C", "#333355", 140),
+            ("☀️ 浅灰", "#f5f5f5", "#333", "#1890ff", "#e0e0e0", 140),
+            ("🌿 清新绿", "#1b4332", "#d8f3dc", "#52b788", "#2d6a4f", 140),
+            ("💜 暗紫", "#2d1b4e", "#e0d6f5", "#9b5de5", "#3d2a6e", 140),
+            ("🏭 工业橙", "#1a1a1a", "#f0f0f0", "#E67E22", "#333", 140),
+        ]
+        for name, bg, txt, act, hov, wd in presets:
+            btn = QPushButton(name)
+            btn.setStyleSheet(f"background:{bg};color:{txt};border:1px solid {act};padding:5px 10px;border-radius:4px;font-size:11px;")
+            def make_cb(b=bg, t=txt, a=act, h=hov, ww=wd):
+                return lambda: [w_bg.setText(b), w_text.setText(t), w_active.setText(a), w_hover.setText(h), w_width.setValue(ww)]
+            btn.clicked.connect(make_cb())
+            pr_ly.addWidget(btn)
+        root_ly.addWidget(presets_grp)
+
+        # ── 表单 ──
+        ly = QFormLayout()
+
+        for label, w in [("背景色", w_bg), ("文字色", w_text), ("选中色", w_active), ("悬停色", w_hover), ("宽度(px)", w_width)]:
+            ly.addRow(label, w)
+        root_ly.addLayout(ly)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        root_ly.addWidget(btn_box)
+
+        if dlg.exec() == QDialog.Accepted:
+            c._nav_bg = w_bg.text().strip() or '#2c3e50'
+            c._nav_text = w_text.text().strip() or '#ecf0f1'
+            c._nav_active = w_active.text().strip() or '#4A90D9'
+            c._nav_hover = w_hover.text().strip() or '#34495e'
+            c._nav_width = w_width.value()
+            self._refresh_code()
+            self.statusBar().showMessage(f"✅ 导航栏样式已更新 — {c._nav_width}px")
 
     def _copy_code(self):
         QApplication.clipboard().setText(self.code_view.toPlainText()); self.btn_copy.setText("已复制!"); self.btn_copy.setEnabled(False)
