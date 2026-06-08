@@ -17,6 +17,10 @@ Mini Designer 是一款专为工业监控与仿真场景设计的纯 Python GUI 
 ## 🚀 2. 快速开始
 
 ### 2.1 启动设计器
+### 前置准备
+1. 安装 Python 3.9+
+2. 安装依赖：`pip install PySide6>=6.5.0`
+3. (可选) 如需自定义控件，确保 .py 文件与 designer 在同一目录
 ```bash
 python mini_designer.py
 ```
@@ -63,6 +67,7 @@ python mini_designer.py
 2.  为每个 Tag 选择波动模式：手动 / 正弦波 / 随机游走 / 锯齿波。
 3.  设置参数：`min=最小值 max=最大值 T=周期(秒)`。
 4.  点击「▶ 开始模拟」，观察曲线、进度条、数值标签的实时变化。
+点击「▶ 开始模拟」后，观察画布上的趋势曲线、进度条、数值标签是否实时变化。注意：需先按 F5 进入预览模式，或确保控件未处于锁定状态。
 
 ### 3.5 🏭 工业模板库
 点击工具栏「🏭 模板」一键插入预设组件：
@@ -110,8 +115,48 @@ my_project/
 ├── opc_comm.py          # 数据绑定通信模板（如有 Tag 绑定时生成）
 └── [自定义控件.py]      # 自动复制引用的自定义控件文件
 ```
+若设计了多个页面，导出的代码将自动生成带侧边导航栏的 QStackedWidget 架构，无需手动编写页面切换逻辑。
+## 4.4 侧边导航栏的样式是完全可设计的。
 
----
+在 `mini_designer.py` 中，多页面模式下的导航栏并非硬编码的固定样式，而是通过**画布属性配置 + 代码生成器动态渲染**实现的。你可以通过以下两种方式自定义其风格：
+### 4.1 1. 使用内置可视化设置面板（推荐）
+点击工具栏上的 **「🧭 导航栏」** 按钮，会弹出专门的样式配置对话框。该面板提供了：
+-   **6套预设主题**：暗夜蓝、深黑、浅灰、清新绿、暗紫、工业橙，一键切换。
+-   **4项核心颜色自定义**：背景色 (`_nav_bg`)、文字色 (`_nav_text`)、选中高亮色 (`_nav_active`)、悬停色 (`_nav_hover`)。
+-   **宽度调节**：支持 100px ~ 300px 范围调整，适应不同分辨率屏幕。
+
+> 💡 **操作路径**：工具栏 →  导航栏 → 选择预设或手动调色 → 确定
+
+### 4.4.2. 直接修改 JSON 项目文件
+导航栏样式作为画布元数据保存在 `.json` 项目中，字段如下：
+```json
+{
+  "nav_bg": "#2c3e50",
+  "nav_text": "#ecf0f1", 
+  "nav_active": "#4A90D9",
+  "nav_hover": "#34495e",
+  "nav_width": 140
+}
+```
+你可以用文本编辑器直接修改这些值，重新加载项目即可生效。这方便你进行精确的色彩匹配或批量复用样式。
+
+### 4.4.3. 导出代码中的实现原理
+当你导出项目时，`CodeGenerator._emit_multipage()` 会将上述配置转换为纯 QSS 字符串嵌入生成的 Python 代码：
+```python
+# 生成的代码片段示例
+self.nav_widget.setStyleSheet(
+    'QWidget{background:#2c3e50;}'
+    'QPushButton{color:#ecf0f1;background:transparent;border:none;...}'
+    'QPushButton:hover{background:#34495e;}'
+    'QPushButton:checked{background:#4A90D9;font-weight:bold;}'
+)
+```
+这意味着**导出的程序完全独立于设计器**，导航栏样式不会丢失，且无需额外依赖。
+
+### ⚠️ 当前限制与扩展建议
+-   **仅支持纯色/渐变背景**：目前不支持图片背景或复杂边框样式。如需更丰富的视觉效果，可在 `_open_nav_settings` 对话框中增加 `QFileDialog` 选择背景图，并在 `_emit_multipage` 中生成对应的 `border-image` QSS。
+-   **按钮高度固定为 36px**：若需自适应内容，可将 `setFixedHeight(36)` 改为 `setMinimumHeight(36)` 并配合布局弹性。
+-   **无图标支持**：当前导航按钮仅为纯文本。如需添加图标，可在页面命名时使用 Unicode Emoji（如 ` 数据监控`），或在 `INDUSTRIAL_TEMPLATES` 中预定义带图标的页面名称模板。
 
 ## 🤖 5. MCP 自动化接口 (AI 协同)
 
@@ -179,6 +224,10 @@ with open("gui_response.json", "r") as f:
 2.  可选：设置 `_display_name = "显示名称"` 属性。
 3.  点击工具栏「🧩 自定义控件」→ 「📂 添加文件」。
 4.  控件自动出现在工具箱「⭐ 自定义控件」分类中。
+💡 加载失败？
+检查 .py 文件是否与 mini_designer.py 在同一目录
+确保类名不以 _ 开头，且继承自 QWidget
+在终端运行 python mini_designer.py 查看控制台报错信息
 
 ### 7.2 导入 SVG 图元
 -   在自定义控件管理器中点击「🎨 导入 SVG」。
