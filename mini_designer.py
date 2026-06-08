@@ -494,6 +494,121 @@ class MultiTrendWidget(QWidget):
 # ══════════════════════════════════════════════════════════════
 # 自定义控件加载
 # ══════════════════════════════════════════════════════════════
+# 🖼️ 图片背景框 (支持图片背景 + 子控件叠加)
+# ══════════════════════════════════════════════════════════════
+class ImageBgWidget(QWidget):
+    """图片背景框 — 可加载图片作为背景，支持缩放模式，可放置子控件"""
+    _display_name = "图片背景框"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._image_path = ""
+        self._pixmap = None
+        self._scale_mode = "fit"      # fit / stretch / tile / center
+        self._opacity = 100           # 0-100
+        self._bg_color = QColor("#f0f0f0")
+        self.setMinimumSize(120, 80)
+
+        # 容器布局 — 支持放置子控件
+        self._content_layout = QVBoxLayout(self)
+        self._content_layout.setContentsMargins(8, 8, 8, 8)
+        self._content_layout.setSpacing(4)
+
+    def setImage(self, path):
+        """加载图片文件"""
+        if not path or not os.path.exists(path):
+            self._image_path = ""
+            self._pixmap = None
+            self.update()
+            return
+        self._image_path = path
+        pix = QPixmap(path)
+        if pix.isNull():
+            self._pixmap = None
+        else:
+            self._pixmap = pix
+        self.update()
+
+    def setPixmapFromBase64(self, b64_data, ext="png"):
+        """从 base64 数据加载图片（用于导出代码）"""
+        from io import BytesIO
+        try:
+            img_data = base64.b64decode(b64_data)
+            pix = QPixmap()
+            pix.loadFromData(img_data, ext.upper())
+            self._pixmap = pix
+            self._image_path = ""
+            self.update()
+        except Exception:
+            pass
+
+    def set_scale_mode(self, mode):
+        if mode in ("fit", "stretch", "tile", "center"):
+            self._scale_mode = mode
+            self.update()
+
+    def set_opacity(self, val):
+        self._opacity = max(0, min(100, int(val)))
+        self.update()
+
+    def set_bg_color(self, c):
+        try:
+            self._bg_color = QColor(c)
+            self.update()
+        except Exception:
+            pass
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        w, h = self.width(), self.height()
+        if w < 1 or h < 1:
+            return
+
+        # 背景底色
+        p.fillRect(self.rect(), self._bg_color)
+
+        # 绘制背景图片
+        if self._pixmap and not self._pixmap.isNull():
+            pw = self._pixmap.width()
+            ph = self._pixmap.height()
+            if pw > 0 and ph > 0:
+                # 透明度
+                p.setOpacity(self._opacity / 100.0)
+
+                if self._scale_mode == "stretch":
+                    p.drawPixmap(0, 0, w, h, self._pixmap)
+
+                elif self._scale_mode == "fit":
+                    scale = min(w / pw, h / ph)
+                    dw, dh = int(pw * scale), int(ph * scale)
+                    dx, dy = (w - dw) // 2, (h - dh) // 2
+                    p.drawPixmap(dx, dy, dw, dh, self._pixmap)
+
+                elif self._scale_mode == "center":
+                    dx, dy = (w - pw) // 2, (h - ph) // 2
+                    p.drawPixmap(max(0, dx), max(0, dy), self._pixmap)
+
+                elif self._scale_mode == "tile":
+                    for ty in range(0, h, ph):
+                        for tx in range(0, w, pw):
+                            p.drawPixmap(tx, ty, self._pixmap)
+
+                p.setOpacity(1.0)
+
+        # 虚线边框 — 设计时提示
+        p.setPen(QPen(QColor("#aaaaaa"), 1, Qt.DashLine))
+        p.drawRect(0, 0, w - 1, h - 1)
+
+    def sizeHint(self):
+        return QSize(240, 160)
+
+    def minimumSizeHint(self):
+        return QSize(80, 60)
+
+
 CUSTOM_WIDGETS = []
 
 
@@ -502,6 +617,8 @@ def get_all_categories():
     # 【修改】直接使用 MultiTrendWidget，名称保持为"实时趋势曲线"以兼容旧习惯
     MultiTrendWidget._display_name = "实时趋势曲线" 
     cats.insert(4, ("📈 工业图表", [("实时趋势曲线", MultiTrendWidget, {})]))
+    # 🖼️ 图片背景框
+    cats.append(("🖼️ 图片容器", [("图片背景框", ImageBgWidget, {})]))
     
     if CUSTOM_WIDGETS:
         custom_items = [(name, cls, kwargs) for name, cls, kwargs, _ in CUSTOM_WIDGETS]
@@ -522,6 +639,7 @@ def get_display_to_entry():
         for item in items: mapping[item[0]] = item
     # 修改此处：使用内置 CurveWidget
     mapping["实时趋势曲线"] = ("实时趋势曲线", MultiTrendWidget, {})
+    mapping["图片背景框"] = ("图片背景框", ImageBgWidget, {})
     for name, cls, kwargs, filepath in CUSTOM_WIDGETS: mapping[name] = (name, cls, kwargs, filepath)
     # 添加 SVG 图元
     try:
@@ -532,8 +650,8 @@ def get_display_to_entry():
         pass
     return mapping
 
-NAME_TO_PREFIX = {"按钮":"btn","工具按钮":"tool_btn","命令链接按钮":"cmd_link","对话框按钮组":"btn_box","复选框":"checkbox","单选按钮":"radio","标签":"label","链接标签":"link_label","单行输入框":"line_edit","多行文本框":"text_edit","只读文本浏览器":"text_browser","下拉框":"combo","整数微调框":"spin_box","浮点微调框":"double_spin","日期选择器":"date_edit","时间选择器":"time_edit","日历控件":"calendar","列表控件":"list_widget","树形控件":"tree_widget","表格控件":"table_widget","滑块":"slider","进度条":"progress","旋钮":"dial","液晶数字显示":"lcd","分组框":"group_box","标签页容器":"tab_widget","堆叠容器":"stacked","滚动区域":"scroll_area","分割面板":"splitter","垂直布局容器":"vbox_container","水平布局容器":"hbox_container","框架":"frame","水平分隔线":"h_line","垂直分隔线":"v_line","实时趋势曲线":"trend"}
-DEFAULT_SIZES = {"按钮":QSize(120,36),"工具按钮":QSize(80,30),"命令链接按钮":QSize(200,48),"对话框按钮组":QSize(260,40),"复选框":QSize(120,28),"单选按钮":QSize(120,28),"标签":QSize(100,30),"链接标签":QSize(120,30),"单行输入框":QSize(160,32),"多行文本框":QSize(220,120),"只读文本浏览器":QSize(240,140),"下拉框":QSize(130,32),"整数微调框":QSize(120,32),"浮点微调框":QSize(130,32),"日期选择器":QSize(140,32),"时间选择器":QSize(140,32),"日历控件":QSize(280,220),"列表控件":QSize(200,150),"树形控件":QSize(220,180),"表格控件":QSize(280,180),"滑块":QSize(180,30),"进度条":QSize(200,28),"旋钮":QSize(80,80),"液晶数字显示":QSize(120,50),"分组框":QSize(200,140),"标签页容器":QSize(280,180),"堆叠容器":QSize(240,160),"滚动区域":QSize(220,160),"分割面板":QSize(300,160),"垂直布局容器":QSize(220,180),"水平布局容器":QSize(300,100),"框架":QSize(160,100),"水平分隔线":QSize(200,3),"垂直分隔线":QSize(3,120),"实时趋势曲线":QSize(360,200)}
+NAME_TO_PREFIX = {"按钮":"btn","工具按钮":"tool_btn","命令链接按钮":"cmd_link","对话框按钮组":"btn_box","复选框":"checkbox","单选按钮":"radio","标签":"label","链接标签":"link_label","单行输入框":"line_edit","多行文本框":"text_edit","只读文本浏览器":"text_browser","下拉框":"combo","整数微调框":"spin_box","浮点微调框":"double_spin","日期选择器":"date_edit","时间选择器":"time_edit","日历控件":"calendar","列表控件":"list_widget","树形控件":"tree_widget","表格控件":"table_widget","滑块":"slider","进度条":"progress","旋钮":"dial","液晶数字显示":"lcd","分组框":"group_box","标签页容器":"tab_widget","堆叠容器":"stacked","滚动区域":"scroll_area","分割面板":"splitter","垂直布局容器":"vbox_container","水平布局容器":"hbox_container","框架":"frame","水平分隔线":"h_line","垂直分隔线":"v_line","实时趋势曲线":"trend","图片背景框":"img_bg"}
+DEFAULT_SIZES = {"按钮":QSize(120,36),"工具按钮":QSize(80,30),"命令链接按钮":QSize(200,48),"对话框按钮组":QSize(260,40),"复选框":QSize(120,28),"单选按钮":QSize(120,28),"标签":QSize(100,30),"链接标签":QSize(120,30),"单行输入框":QSize(160,32),"多行文本框":QSize(220,120),"只读文本浏览器":QSize(240,140),"下拉框":QSize(130,32),"整数微调框":QSize(120,32),"浮点微调框":QSize(130,32),"日期选择器":QSize(140,32),"时间选择器":QSize(140,32),"日历控件":QSize(280,220),"列表控件":QSize(200,150),"树形控件":QSize(220,180),"表格控件":QSize(280,180),"滑块":QSize(180,30),"进度条":QSize(200,28),"旋钮":QSize(80,80),"液晶数字显示":QSize(120,50),"分组框":QSize(200,140),"标签页容器":QSize(280,180),"堆叠容器":QSize(240,160),"滚动区域":QSize(220,160),"分割面板":QSize(300,160),"垂直布局容器":QSize(220,180),"水平布局容器":QSize(300,100),"框架":QSize(160,100),"水平分隔线":QSize(200,3),"垂直分隔线":QSize(3,120),"实时趋势曲线":QSize(360,200),"图片背景框":QSize(240,160)}
 
 def _esc(s): return s.replace("\\","\\\\").replace('"','\\"')
 def _sanitize(name): return re.sub(r"_+","_",re.sub(r"[^a-zA-Z0-9_]","_",name)).strip("_").lower() or "widget"
@@ -1944,6 +2062,10 @@ class CodeGenerator:
             lines.insert(0, imp)
         if custom_imports:
             lines.insert(0, "")
+        
+        # 检测是否使用了内置自定义控件（如 MultiTrendWidget），嵌入类定义
+        CodeGenerator._embed_trend_widget_if_needed(canvas, lines)
+
         tag_bindings = CodeGenerator._collect_tag_bindings(canvas)
         if tag_bindings:
             lines.extend(CodeGenerator._generate_data_binder(tag_bindings)); lines.append("")
@@ -1955,6 +2077,29 @@ class CodeGenerator:
             CodeGenerator._emit_multipage(canvas, lines, tag_bindings, obj_name_map)
         else:
             lines += ["        self.central_widget = QWidget()","        self.setCentralWidget(self.central_widget)",""]
+            # 🖼️ 画布背景图
+            bg_path = getattr(canvas, '_canvas_bg_path', '') or ''
+            if bg_path and os.path.exists(bg_path):
+                try:
+                    # 补充 QtGui import
+                    for i, line in enumerate(lines):
+                        if line.startswith("from PySide6.QtWidgets import ("):
+                            lines.insert(i+1, "from PySide6.QtGui import QPixmap, QPainter, QColor")
+                            break
+                    with open(bg_path, "rb") as f:
+                        bg_b64 = base64.b64encode(f.read()).decode()
+                    ext = os.path.splitext(bg_path)[1].lstrip('.') or 'png'
+                    lines.append(f'        # 画布背景图')
+                    lines.append(f'        _bg_data = base64.b64decode("{bg_b64}")')
+                    lines.append(f'        _bg_pix = QPixmap()')
+                    lines.append(f'        _bg_pix.loadFromData(_bg_data, "{ext.upper()}")')
+                    bg_mode = getattr(canvas, '_canvas_bg_scale', 'fit')
+                    bg_op = getattr(canvas, '_canvas_bg_opacity', 100)
+                    lines.append(f'        self._bg_pixmap = _bg_pix')
+                    lines.append(f'        self._bg_scale = "{bg_mode}"')
+                    lines.append(f'        self._bg_opacity = {bg_op}')
+                except Exception:
+                    pass
             used = {}
             for w in canvas._canvas_widgets:
                 if w.property("_designer_hidden"): continue
@@ -2000,8 +2145,257 @@ class CodeGenerator:
         anchor_widgets = CodeGenerator._collect_anchor_widgets(canvas)
         if anchor_widgets:
             lines.append(""); lines.extend(CodeGenerator._generate_resize_event(anchor_widgets, used, canvas))
+        # 🖼️ 画布背景图绘制
+        bg_path = getattr(canvas, '_canvas_bg_path', '') or ''
+        if bg_path and os.path.exists(bg_path):
+            lines.append("")
+            lines.append("    def paintEvent(self, event):")
+            lines.append("        super().paintEvent(event)")
+            lines.append("        if hasattr(self, '_bg_pixmap') and self._bg_pixmap and not self._bg_pixmap.isNull():")
+            lines.append("            p = QPainter(self)")
+            lines.append("            pw, ph = self._bg_pixmap.width(), self._bg_pixmap.height()")
+            lines.append("            dw, dh = self.width(), self.height()")
+            lines.append("            if pw > 0 and ph > 0:")
+            lines.append("                p.setOpacity(getattr(self, '_bg_opacity', 100) / 100.0)")
+            lines.append("                mode = getattr(self, '_bg_scale', 'fit')")
+            lines.append("                if mode == 'stretch':")
+            lines.append("                    p.drawPixmap(0, 0, dw, dh, self._bg_pixmap)")
+            lines.append("                elif mode == 'fit':")
+            lines.append("                    s = min(dw / pw, dh / ph)")
+            lines.append("                    p.drawPixmap((dw - int(pw*s))//2, (dh - int(ph*s))//2, int(pw*s), int(ph*s), self._bg_pixmap)")
+            lines.append("                elif mode == 'center':")
+            lines.append("                    p.drawPixmap(max(0,(dw-pw)//2), max(0,(dh-ph)//2), self._bg_pixmap)")
+            lines.append("                elif mode == 'tile':")
+            lines.append("                    for ty in range(0, dh, ph):")
+            lines.append("                        for tx in range(0, dw, pw):")
+            lines.append("                            p.drawPixmap(tx, ty, self._bg_pixmap)")
+            lines.append("                p.setOpacity(1.0)")
+            lines.append("            p.end()")
         lines += ["",'if __name__ == "__main__":',"    app = QApplication(sys.argv)","    window = GeneratedWindow()","    window.show()","    sys.exit(app.exec())"]
         return "\n".join(lines)
+
+    @staticmethod
+    def _embed_trend_widget_if_needed(canvas, lines):
+        """检测画布上是否使用了 MultiTrendWidget / ImageBgWidget，如果有则嵌入类定义"""
+        has_trend = any(
+            hasattr(w, '_demo_timer') and hasattr(w, 'addValue')
+            for page_data in canvas._pages
+            for w in page_data.get("widgets", [])
+        ) or any(
+            type(w).__name__ == "MultiTrendWidget"
+            for w in canvas._canvas_widgets
+        )
+        has_image_bg = any(
+            hasattr(w, '_image_path') and hasattr(w, 'setImage')
+            for page_data in canvas._pages
+            for w in page_data.get("widgets", [])
+        ) or any(
+            type(w).__name__ == "ImageBgWidget"
+            for w in canvas._canvas_widgets
+        )
+
+        if not has_trend and not has_image_bg:
+            return
+
+        # 公共 import（趋势曲线 + 图片背景框都需要）
+        for i, line in enumerate(lines):
+            if line.startswith("from PySide6.QtWidgets import ("):
+                lines.insert(i, "from PySide6.QtGui import QPainter, QColor, QFont, QPen, QBrush, QPainterPath, QFontMetrics")
+                lines.insert(i, "from PySide6.QtCore import Qt, QRectF, QPointF, QSize, QTimer")
+                break
+
+        # ── 嵌入 MultiTrendWidget ──
+        if has_trend:
+            lines.insert(0, "from collections import deque")
+            lines.insert(0, "import math, random, time")
+            trend_src = r'''
+# ── 实时趋势曲线控件（由 Mini Designer 自动生成） ──
+class MultiTrendWidget(QWidget):
+    """工业级多通道实时趋势曲线"""
+    _display_name = "实时趋势曲线"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self.setMinimumSize(200, 150)
+        self._channels = [
+            {"name": "温度", "color": QColor("#4A90D9"), "data": deque(maxlen=10000)},
+            {"name": "压力", "color": QColor("#E74C3C"), "data": deque(maxlen=10000)},
+        ]
+        self._x_range = 60; self._y_min = 0.0; self._y_max = 100.0
+        self._auto_scale_y = False; self._grid_density_x = 6; self._grid_density_y = 5
+        self._bg_color = QColor("#1a1a2e"); self._grid_color = QColor("#333355")
+        self._text_color = QColor("#aaaacc"); self._border_color = QColor("#444466")
+        self._running = False; self._demo_phase = 0.0
+        self._demo_timer = QTimer(self)
+        self._demo_timer.timeout.connect(self._demo_tick)
+
+    def addValue(self, channel_index, value):
+        if 0 <= channel_index < len(self._channels):
+            self._channels[channel_index]["data"].append((time.time(), float(value)))
+            if self.isVisible(): self.update()
+
+    def start(self):
+        if not self._running:
+            self._running = True
+            if not self._demo_timer.isActive(): self._demo_timer.start(50)
+    def stop(self): self._running = False; self._demo_timer.stop()
+
+    def _demo_tick(self):
+        if not self.isVisible(): return
+        self._demo_phase += 0.05
+        for i in range(min(2, len(self._channels))):
+            val = 50 + 30 * math.sin(self._demo_phase + i * 1.5) + random.uniform(-2, 2)
+            self.addValue(i, val)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        w, h = self.width(), self.height()
+        if w < 10 or h < 10: return
+        ml, mr, mt, mb = 50, 20, 20, 35
+        pw, ph = w - ml - mr, h - mt - mb
+        p.fillRect(self.rect(), self._bg_color)
+        max_visible = self._x_range
+        visible_chs = [ch for ch in self._channels if ch["data"]]
+        y_min, y_max = self._y_min, self._y_max
+        if self._auto_scale_y and visible_chs:
+            vis_vals = [v for ch in visible_chs for t, v in list(ch["data"])[-max_visible:]]
+            if vis_vals:
+                y_min, y_max = min(vis_vals), max(vis_vals)
+                pad = (y_max - y_min) * 0.1 or 5.0; y_min -= pad; y_max += pad
+        y_range = y_max - y_min if y_max != y_min else 1.0
+        p.setPen(QPen(self._grid_color, 1, Qt.DotLine))
+        for i in range(self._grid_density_y + 1):
+            p.drawLine(ml, int(mt + ph * i / self._grid_density_y), ml + pw, int(mt + ph * i / self._grid_density_y))
+        for i in range(self._grid_density_x + 1):
+            p.drawLine(int(ml + pw * i / self._grid_density_x), mt, int(ml + pw * i / self._grid_density_x), mt + ph)
+        p.setPen(QPen(self._border_color, 1.5)); p.drawRect(ml, mt, int(pw), int(ph))
+        p.setClipRect(ml, mt, int(pw), int(ph))
+        for ch in visible_chs:
+            data = list(ch["data"])[-max_visible:]
+            if len(data) < 2: continue
+            step_x = pw / max(1, max_visible - 1)
+            path = QPainterPath()
+            for j, (t, val) in enumerate(data):
+                px = ml + j * step_x; py = mt + ph * (1.0 - (val - y_min) / y_range)
+                if j == 0: path.moveTo(px, py)
+                else: path.lineTo(px, py)
+            p.setPen(QPen(ch["color"], 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPath(path)
+        p.setClipping(False)
+        p.setPen(QPen(self._text_color, 1))
+        p.setFont(QFont("Consolas", 8))
+        for i in range(self._grid_density_y + 1):
+            val = y_max - (y_range * i / self._grid_density_y)
+            p.drawText(2, int(mt + ph * i / self._grid_density_y) - 6, ml - 6, 12, Qt.AlignRight | Qt.AlignVCenter, f"{val:.1f}")
+        t_first = time.time() - (max_visible * 0.05); dt_per_step = 0.05
+        for ch in visible_chs:
+            d = list(ch["data"])[-max_visible:]
+            if len(d) >= 2:
+                t_first = d[0][0]; t_last = d[-1][0]
+                dt_per_step = (t_last - t_first) / (len(d) - 1) if t_last != t_first else 0.05
+                break
+        step_x = pw / max(1, max_visible - 1)
+        for i in range(self._grid_density_x + 1):
+            gx = int(ml + pw * i / self._grid_density_x)
+            p.drawLine(gx, mt + ph, gx, mt + ph + 4)
+            lt = time.localtime(int(t_first + (gx - ml) / step_x * dt_per_step))
+            p.drawText(gx - 30, mt + ph + 8, 60, 15, Qt.AlignCenter, time.strftime("%H:%M:%S", lt))
+
+    def sizeHint(self): return QSize(400, 250)
+    def minimumSizeHint(self): return QSize(150, 100)
+'''
+            for line in trend_src.strip().split("\n"):
+                lines.append(line.rstrip())
+            lines.append("")
+
+        # 🖼️ 嵌入 ImageBgWidget 类定义
+        if has_image_bg:
+            img_bg_src = r'''
+# ── 图片背景框（由 Mini Designer 自动生成） ──
+class ImageBgWidget(QWidget):
+    _display_name = "图片背景框"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._image_path = ""
+        self._pixmap = None
+        self._scale_mode = "fit"
+        self._opacity = 100
+        self._bg_color = QColor("#f0f0f0")
+        self.setMinimumSize(120, 80)
+        self._content_layout = QVBoxLayout(self)
+        self._content_layout.setContentsMargins(8, 8, 8, 8)
+        self._content_layout.setSpacing(4)
+
+    def setImage(self, path):
+        if not path or not os.path.exists(path):
+            self._image_path = ""
+            self._pixmap = None
+            self.update()
+            return
+        self._image_path = path
+        pix = QPixmap(path)
+        if pix.isNull(): self._pixmap = None
+        else: self._pixmap = pix
+        self.update()
+
+    def setPixmapFromBase64(self, b64_data, ext="png"):
+        from io import BytesIO
+        try:
+            img_data = base64.b64decode(b64_data)
+            pix = QPixmap()
+            pix.loadFromData(img_data, ext.upper())
+            self._pixmap = pix
+            self._image_path = ""
+            self.update()
+        except Exception:
+            pass
+
+    def set_scale_mode(self, mode):
+        if mode in ("fit", "stretch", "tile", "center"):
+            self._scale_mode = mode; self.update()
+
+    def set_opacity(self, val):
+        self._opacity = max(0, min(100, int(val))); self.update()
+
+    def set_bg_color(self, c):
+        try: self._bg_color = QColor(c); self.update()
+        except: pass
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        w, h = self.width(), self.height()
+        if w < 1 or h < 1: return
+        p.fillRect(self.rect(), self._bg_color)
+        if self._pixmap and not self._pixmap.isNull():
+            pw, ph = self._pixmap.width(), self._pixmap.height()
+            if pw > 0 and ph > 0:
+                p.setOpacity(self._opacity / 100.0)
+                if self._scale_mode == "stretch":
+                    p.drawPixmap(0, 0, w, h, self._pixmap)
+                elif self._scale_mode == "fit":
+                    s = min(w / pw, h / ph)
+                    dw, dh = int(pw * s), int(ph * s)
+                    p.drawPixmap((w - dw) // 2, (h - dh) // 2, dw, dh, self._pixmap)
+                elif self._scale_mode == "center":
+                    p.drawPixmap(max(0, (w - pw) // 2), max(0, (h - ph) // 2), self._pixmap)
+                elif self._scale_mode == "tile":
+                    for ty in range(0, h, ph):
+                        for tx in range(0, w, pw):
+                            p.drawPixmap(tx, ty, self._pixmap)
+                p.setOpacity(1.0)
+        p.setPen(QPen(QColor("#aaaaaa"), 1, Qt.DashLine))
+        p.drawRect(0, 0, w - 1, h - 1)
+
+    def sizeHint(self): return QSize(240, 160)
+    def minimumSizeHint(self): return QSize(80, 60)
+'''
+            lines.append(img_bg_src.strip())
+
     @staticmethod
     def _generate_ui_class(canvas, qss_filename="style.qss") -> str:
         canvas._save_current_page()
@@ -2012,6 +2406,9 @@ class CodeGenerator:
             lines.insert(0, imp)
         if custom_imports:
             lines.insert(0, "")
+
+        # 检测内置自定义控件（如 MultiTrendWidget），嵌入类定义
+        CodeGenerator._embed_trend_widget_if_needed(canvas, lines)
 
         tag_bindings = CodeGenerator._collect_tag_bindings(canvas)
         if tag_bindings:
@@ -2067,7 +2464,7 @@ class CodeGenerator:
             lines += [
                 f"        btn_{safe_name} = QPushButton('{_esc(pname)}')",
                 f"        btn_{safe_name}.setFixedHeight(36)",
-                "        btn_{safe_name}.setStyleSheet('QPushButton{{color:#ecf0f1;background:transparent;border:none;text-align:left;padding:8px 12px;font-size:12px;border-radius:4px;}}"
+                f"        btn_{safe_name}.setStyleSheet('QPushButton{{color:#ecf0f1;background:transparent;border:none;text-align:left;padding:8px 12px;font-size:12px;border-radius:4px;}}"
                 "QPushButton:hover{{background:#34495e;}}QPushButton:checked{{background:#4A90D9;font-weight:bold;}}')",
                 f"        btn_{safe_name}.setCheckable(True)",
                 f"        btn_{safe_name}.clicked.connect(lambda checked, idx={i}: self.stack.setCurrentIndex(idx))",
@@ -2222,6 +2619,46 @@ class CodeGenerator:
             if obj_name:
                 obj_name_map[obj_name] = var
         g = w.geometry(); cls = type(w).__name__
+
+        # 🖼️ 图片背景框 — 专用导出
+        if cls == "ImageBgWidget" and hasattr(w, "_content_layout"):
+            ly_cls = type(w._content_layout).__name__; ly_var = f"ly_{var}"
+            lines.append(f"{indent}# ── ImageBg: {var} ──")
+            img_path = getattr(w, '_image_path', '') or ''
+            b64_data = ""
+            if img_path and os.path.exists(img_path):
+                try:
+                    with open(img_path, "rb") as f:
+                        b64_data = base64.b64encode(f.read()).decode()
+                except Exception:
+                    pass
+            scale_mode = getattr(w, '_scale_mode', 'fit')
+            opacity = getattr(w, '_opacity', 100)
+
+            lines.append(f'{indent}self.{var} = ImageBgWidget({parent_ref})')
+            lines.append(f"{indent}self.{var}.setGeometry({g.x()}, {g.y()}, {g.width()}, {g.height()})")
+            if b64_data:
+                ext = os.path.splitext(img_path)[1].lstrip('.') if img_path else 'png'
+                lines.append(f'{indent}from io import BytesIO')
+                lines.append(f'{indent}self.{var}.setPixmapFromBase64("{b64_data}", "{ext}")')
+            lines.append(f'{indent}self.{var}.set_scale_mode("{scale_mode}")')
+            lines.append(f'{indent}self.{var}.set_opacity({opacity})')
+            role = w.property("role") or "default"
+            if role != "default": lines.append(f'{indent}self.{var}.setProperty("role", "{role}")')
+            obj_name = w.objectName()
+            if obj_name: lines.append(f'{indent}self.{var}.setObjectName("{obj_name}")')
+            tag = w.property("_tag") or ""
+            if tag: lines.append(f'{indent}self.{var}.setProperty("_tag", "{tag}")')
+            ss = w.styleSheet()
+            if ss: lines.append(f'{indent}self.{var}.setStyleSheet("{_esc(ss)}")')
+            lines.append(f"{indent}self.{ly_var} = {ly_cls}(self.{var})")
+            lines.append(f"{indent}self.{ly_var}.setContentsMargins(8, 8, 8, 8)")
+            lines.append(f"{indent}self.{ly_var}.setSpacing(4)"); lines.append("")
+            for i in range(w._content_layout.count()):
+                cw = w._content_layout.itemAt(i).widget()
+                if cw and not cw.property("_designer_hidden"): CodeGenerator._emit_child(cw, lines, used, f"self.{ly_var}", indent, obj_name_map)
+            return
+
         if hasattr(w, "_content_layout"):
             ly_cls = type(w._content_layout).__name__; ly_var = f"ly_{var}"
             lines.append(f"{indent}# ── Container: {var} ──"); lines.append(f"{indent}self.{var} = QFrame({parent_ref})")
@@ -2261,7 +2698,7 @@ class CodeGenerator:
         elif isinstance(w, QSplitter): ctor_args = "Qt.Horizontal" if w.orientation()==Qt.Horizontal else "Qt.Vertical"
         # 自定义控件：如果支持实时数据推送，自动启动 demo
         if hasattr(w, '_demo_timer') and hasattr(w, 'start'):
-            pass  # start() 在生成代码中由用户自行决定，不自动调用
+            pass
         elif cls not in ("QPushButton","QToolButton","QLabel","QGroupBox","QLineEdit","QComboBox","QCheckBox","QRadioButton","QSpinBox","QDoubleSpinBox","QSlider","QProgressBar","QLCDNumber","QDial","QCommandLinkButton","QFrame","QSplitter"):
             # SVG 图元：用基类 + base64 内联数据
             if hasattr(w, '_renderer') and hasattr(w, '_svg_name'):
@@ -2286,6 +2723,9 @@ class CodeGenerator:
                 ss_esc = _esc(ss).replace('\n', '\\n').replace('\r', '')
                 lines.append(f'{indent}self.{var}.setStyleSheet("{ss_esc}")')
             lines.append(""); return
+
+        # 🖼️ QFrame + 图片 → 保持 QFrame + border-image 样式（不内嵌）
+        # 图片路径由 border-image 在 QSS 中引用，拷贝项目时带上图片即可
         lines.append(f"{indent}self.{var} = {cls}({ctor_args}, {parent_ref})" if ctor_args else f"{indent}self.{var} = {cls}({parent_ref})")
         lines.append(f"{indent}self.{var}.setGeometry({g.x()}, {g.y()}, {g.width()}, {g.height()})")
         role = w.property("role") or "default"
@@ -2308,6 +2748,29 @@ class CodeGenerator:
             if obj_name:
                 obj_name_map[obj_name] = var
         cls = type(w).__name__; ctor_args, post_init = "", []
+
+        # 🖼️ 图片背景框在布局中
+        if cls == "ImageBgWidget" and hasattr(w, "_content_layout"):
+            ly_cls = type(w._content_layout).__name__; ly_var = f"ly_{var}"
+            lines.append(f"{indent}# ── ImageBg: {var} ──")
+            lines.append(f"{indent}self.{var} = ImageBgWidget()")
+            lines.append(f"{indent}self.{ly_var} = {ly_cls}(self.{var})")
+            lines.append(f"{indent}self.{ly_var}.setContentsMargins(8, 8, 8, 8)")
+            lines.append(f"{indent}self.{ly_var}.setSpacing(4)")
+            role = w.property("role") or "default"
+            if role != "default": lines.append(f'{indent}self.{var}.setProperty("role", "{role}")')
+            ss = w.styleSheet()
+            if ss:
+                ss_esc = _esc(ss).replace('\n', '\\n').replace('\r', '')
+                lines.append(f'{indent}self.{var}.setStyleSheet("{ss_esc}")')
+            lines.append(f"{indent}{layout_ref}.addWidget(self.{var})")
+            for i in range(w._content_layout.count()):
+                cw = w._content_layout.itemAt(i).widget()
+                if cw and not cw.property("_designer_hidden"):
+                    CodeGenerator._emit_child(cw, lines, used, f"self.{ly_var}", indent, obj_name_map)
+            lines.append("")
+            return
+
         if isinstance(w, (QPushButton, QCheckBox, QRadioButton, QLabel, QCommandLinkButton)):
             if hasattr(w,"text") and w.text(): ctor_args = f'"{_esc(w.text())}"'
         elif isinstance(w, QToolButton):
@@ -2319,7 +2782,7 @@ class CodeGenerator:
         elif isinstance(w, QTableWidget): post_init += [f"self.{var}.setRowCount(3)", f"self.{var}.setColumnCount(3)"]
         elif isinstance(w, QSplitter): ctor_args = "Qt.Horizontal" if w.orientation()==Qt.Horizontal else "Qt.Vertical"
         if hasattr(w, '_demo_timer') and hasattr(w, 'start'):
-            pass  # start() 在生成代码中由用户自行决定，不自动调用
+            pass
         lines.append(f"{indent}self.{var} = {cls}({ctor_args})" if ctor_args else f"{indent}self.{var} = {cls}()")
         role = w.property("role") or "default"
         if role != "default": lines.append(f'{indent}self.{var}.setProperty("role", "{role}")')
@@ -2459,6 +2922,11 @@ class DesignerCanvas(QWidget):
         self._snap_guides = []; self._insert_indicator = None; self._drag_start_geoms = {}
         self._rubber_band_active = False; self._rubber_band_start = QPoint(); self._rubber_band_rect = QRect()
         self._grid_cache = None; self._grid_cache_size = (-1, -1); self._grid_cache_zoom = 0
+        # 🖼️ 画布背景图（每个页面独立）
+        self._canvas_bg_path = ""
+        self._canvas_bg_pixmap = None
+        self._canvas_bg_scale = "fit"   # fit / stretch / tile / center
+        self._canvas_bg_opacity = 100
         QShortcut(QKeySequence.Delete, self).activated.connect(self._delete_selected)
         QShortcut(QKeySequence("Ctrl+Z"), self).activated.connect(self.undo)
         QShortcut(QKeySequence("Ctrl+Y"), self).activated.connect(self.redo)
@@ -2476,6 +2944,27 @@ class DesignerCanvas(QWidget):
 
     def undo(self): self.history.undo(); self._deselect(); self.widget_modified.emit(); self.update()
     def redo(self): self.history.redo(); self._deselect(); self.widget_modified.emit(); self.update()
+
+    # 🖼️ 画布背景图
+    def set_canvas_background(self, path):
+        """设置画布背景图片（空路径=清除）"""
+        if not path or not os.path.exists(path):
+            self._canvas_bg_path = ""
+            self._canvas_bg_pixmap = None
+            self.update()
+            return
+        pix = QPixmap(path)
+        if pix.isNull():
+            self._canvas_bg_pixmap = None
+        else:
+            self._canvas_bg_path = path
+            self._canvas_bg_pixmap = pix
+        self.update()
+
+    def clear_canvas_background(self):
+        self._canvas_bg_path = ""
+        self._canvas_bg_pixmap = None
+        self.update()
 
     def _toggle_grid(self):
         self._grid_enabled = not self._grid_enabled
@@ -3229,6 +3718,18 @@ class DesignerCanvas(QWidget):
         if title_attr is not None: info["title"] = title_attr
         if placeholder_attr is not None: info["placeholderText"] = placeholder_attr
         if value_attr is not None: info["value"] = value_attr
+
+        # 🖼️ 图片背景框属性
+        if hasattr(w, '_image_path'):
+            info["_image_path"] = getattr(w, '_image_path', '')
+            info["_scale_mode"] = getattr(w, '_scale_mode', 'fit')
+            info["_opacity"] = getattr(w, '_opacity', 100)
+
+        # 🖼️ QFrame 图片属性
+        if isinstance(w, QFrame) and not hasattr(w, '_image_path'):
+            fimg = w.property("_frame_image_path") or ""
+            if fimg:
+                info["_frame_image_path"] = fimg
         
         src = w.property("_custom_source")
         if src: info["_custom_source"] = self._to_json_safe(src)
@@ -3340,6 +3841,9 @@ class DesignerCanvas(QWidget):
                 "callback_code": self._callback_code,
                 "design_width": self.design_width,
                 "design_height": self.design_height,
+                "canvas_bg_path": self._canvas_bg_path,
+                "canvas_bg_scale": self._canvas_bg_scale,
+                "canvas_bg_opacity": self._canvas_bg_opacity,
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -3369,6 +3873,11 @@ class DesignerCanvas(QWidget):
             # 恢复画布尺寸
             if "design_width" in raw:
                 self.set_canvas_size(raw["design_width"], raw["design_height"])
+            # 🖼️ 恢复画布背景
+            if "canvas_bg_path" in raw and raw["canvas_bg_path"]:
+                self.set_canvas_background(raw["canvas_bg_path"])
+                self._canvas_bg_scale = raw.get("canvas_bg_scale", "fit")
+                self._canvas_bg_opacity = raw.get("canvas_bg_opacity", 100)
             pages_data = raw.get("pages", [])
             if pages_data:
                 self._pages = []
@@ -3494,6 +4003,31 @@ class DesignerCanvas(QWidget):
                         w.load_svg_from_data(svg_data, name)
                     except Exception:
                         pass
+
+                # 🖼️ 图片背景框属性恢复
+                if "_image_path" in info and hasattr(w, 'setImage'):
+                    try:
+                        w.setImage(info["_image_path"])
+                        if "_scale_mode" in info:
+                            w.set_scale_mode(info["_scale_mode"])
+                        if "_opacity" in info:
+                            w.set_opacity(info["_opacity"])
+                    except Exception:
+                        pass
+
+                # 🖼️ QFrame 图片恢复（border-image）
+                if "_frame_image_path" in info and isinstance(w, QFrame) and not hasattr(w, '_image_path'):
+                    try:
+                        fimg = info["_frame_image_path"]
+                        w.setProperty("_frame_image_path", fimg)
+                        if fimg and os.path.exists(fimg):
+                            existing = w.styleSheet()
+                            import re as _re
+                            existing = _re.sub(r'border-image\s*:\s*url\([^)]+\)\s*;?\s*', '', existing)
+                            new_qss = f"border-image: url({fimg.replace(os.sep, '/')});"
+                            w.setStyleSheet((existing + "\n" + new_qss) if existing.strip() else new_qss)
+                    except Exception:
+                        pass
                         
             except Exception as e:
                 print(f"[Load Warning] 恢复 {w.objectName()} 深度属性失败: {e}")
@@ -3566,6 +4100,29 @@ class DesignerCanvas(QWidget):
         
         p = QPainter(self)
         p.scale(self._zoom_factor, self._zoom_factor)
+        
+        # 🖼️ 画布背景图（网格下层）
+        if self._canvas_bg_pixmap and not self._canvas_bg_pixmap.isNull():
+            pw = self._canvas_bg_pixmap.width()
+            ph = self._canvas_bg_pixmap.height()
+            dw = int(self.design_width)
+            dh = int(self.design_height)
+            if pw > 0 and ph > 0:
+                p.setOpacity(self._canvas_bg_opacity / 100.0)
+                mode = self._canvas_bg_scale
+                if mode == "stretch":
+                    p.drawPixmap(0, 0, dw, dh, self._canvas_bg_pixmap)
+                elif mode == "fit":
+                    s = min(dw / pw, dh / ph)
+                    tw, th = int(pw * s), int(ph * s)
+                    p.drawPixmap((dw - tw) // 2, (dh - th) // 2, tw, th, self._canvas_bg_pixmap)
+                elif mode == "center":
+                    p.drawPixmap(max(0, (dw - pw) // 2), max(0, (dh - ph) // 2), self._canvas_bg_pixmap)
+                elif mode == "tile":
+                    for ty in range(0, dh, ph):
+                        for tx in range(0, dw, pw):
+                            p.drawPixmap(tx, ty, self._canvas_bg_pixmap)
+                p.setOpacity(1.0)
         
         # ── 1. 绘制网格（缓存，限制最大尺寸）────────────────
         if self._grid_enabled:
@@ -3824,6 +4381,34 @@ class DesignerCanvas(QWidget):
             self.update()
         super().mouseReleaseEvent(e)
 
+    def contextMenuEvent(self, event):
+        """右键空白画布 → 画布背景菜单"""
+        # 只在没选中任何控件时显示
+        if self._selected:
+            # 让选中控件的右键菜单处理
+            super().contextMenuEvent(event)
+            return
+        menu = QMenu(self)
+        if self._canvas_bg_path:
+            act_clear = menu.addAction("🗑️ 清除画布背景")
+        else:
+            act_set = menu.addAction("🖼️ 设置画布背景...")
+        chosen = menu.exec(event.globalPos())
+        if not chosen:
+            return
+        if not self._canvas_bg_path:
+            path, _ = QFileDialog.getOpenFileName(self, "选择背景图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif)")
+            if path:
+                self.set_canvas_background(path)
+                win = self.window()
+                if hasattr(win, "statusBar"):
+                    win.statusBar().showMessage(f"✅ 画布背景已设置: {os.path.basename(path)}")
+        else:
+            self.clear_canvas_background()
+            win = self.window()
+            if hasattr(win, "statusBar"):
+                win.statusBar().showMessage("画布背景已清除")
+
     def _show_context_menu(self, global_pos):
         w = self._selected
         if not w: return
@@ -4023,6 +4608,23 @@ class PropertyEditor(QWidget):
             ("grid_color", getattr(w, '_grid_color', QColor("#333355")).name(), True),
             ("text_color", getattr(w, '_text_color', QColor("#aaaacc")).name(), True),
         ]  
+
+        # 🖼️ 图片背景框属性
+        if cls_name == "ImageBgWidget":
+            props += [
+            ("image_path", getattr(w, '_image_path', ''), True),
+            ("scale_mode", getattr(w, '_scale_mode', 'fit'), True),
+            ("opacity", str(getattr(w, '_opacity', 100)), True),
+            ("bg_color", getattr(w, '_bg_color', QColor("#f0f0f0")).name(), True),
+        ]
+
+        # 🖼️ 框架（QFrame）图片属性
+        if cls_name == "QFrame":
+            frame_img = w.property("_frame_image_path") or ""
+            props += [
+            ("image_path", frame_img, True),
+        ]
+
         self._render_props(props, w); self._busy = False
 
     def _refresh_batch(self):
@@ -4228,6 +4830,40 @@ class PropertyEditor(QWidget):
             elif prop == "spacing" and hasattr(w, "_content_layout"):
                 old_val = str(w._content_layout.spacing())
             elif prop == "styleSheet": old_val = w.styleSheet()
+            # 🖼️ 图片背景框属性
+            elif prop == "image_path" and hasattr(w, 'setImage'):
+                old_val = getattr(w, '_image_path', '')
+                w.setImage(value)
+            elif prop == "scale_mode" and hasattr(w, 'set_scale_mode'):
+                old_val = getattr(w, '_scale_mode', 'fit')
+                w.set_scale_mode(value)
+            elif prop == "opacity" and hasattr(w, 'set_opacity'):
+                old_val = str(getattr(w, '_opacity', 100))
+                w.set_opacity(int(value))
+            elif prop == "bg_color" and hasattr(w, 'set_bg_color'):
+                old_val = getattr(w, '_bg_color', QColor("#f0f0f0")).name()
+                w.set_bg_color(value)
+            # 🖼️ QFrame 图片路径 → border-image
+            elif prop == "image_path" and isinstance(w, QFrame) and not hasattr(w, '_image_path'):
+                old_val = w.property("_frame_image_path") or ""
+                w.setProperty("_frame_image_path", value)
+                if value and os.path.exists(value):
+                    # 保持已有样式，追加 border-image
+                    existing = w.styleSheet()
+                    # 去掉旧的 border-image
+                    import re as _re
+                    existing = _re.sub(r'border-image\s*:\s*url\([^)]+\)\s*;?\s*', '', existing)
+                    new_qss = f"border-image: url({value.replace(os.sep, '/')});"
+                    if existing.strip():
+                        w.setStyleSheet(existing + "\n" + new_qss)
+                    else:
+                        w.setStyleSheet(new_qss)
+                else:
+                    # 清除：去掉 border-image
+                    existing = w.styleSheet()
+                    import re as _re
+                    existing = _re.sub(r'border-image\s*:\s*url\([^)]+\)\s*;?\s*', '', existing)
+                    w.setStyleSheet(existing.strip())
         except: old_val = ""
         if str(old_val) == value: return
         canvas.history.push(PropertyChangeCmd(canvas, w, prop, old_val, value))
@@ -4251,6 +4887,11 @@ class DesignerMainWindow(QMainWindow):
         QApplication.instance().setStyleSheet(ACTIVE_QSS)
         self._wire(); self._restore_state()
         self._auto_load_custom_widgets()
+        # 启动 MCP 命令监听（每 300ms 轮询 gui_command.json）
+        self._command_pending_id = None
+        self._command_timer = QTimer(self)
+        self._command_timer.timeout.connect(self._poll_commands)
+        self._command_timer.start(300)
 
     def _setup_ui(self):
         central = QWidget(); self.setCentralWidget(central)
@@ -5105,6 +5746,310 @@ class DesignerMainWindow(QMainWindow):
 # ═══════════════════════════════════════════════════════════════
 # 📂 项目面板
 # ═══════════════════════════════════════════════════════════════# ═══════════════════════════════════════════════════════════════
+# MCP 命令监听 — 允许 AI 助手直接操控设计器
+# ═══════════════════════════════════════════════════════════════
+    MCP_COMMAND_FILE = "gui_command.json"
+    MCP_RESPONSE_FILE = "gui_response.json"
+    MCP_PREVIEW_FILE = "canvas_preview.png"
+
+    def _poll_commands(self):
+        """轮询 gui_command.json，解析并执行 MCP 下发的指令"""
+        try:
+            self._poll_commands_impl()
+        except Exception:
+            pass  # 静默忽略，防止 QTimer 无限抛错
+
+    def _poll_commands_impl(self):
+        cmd_file = self.MCP_COMMAND_FILE
+        if not os.path.exists(cmd_file):
+            return
+        try:
+            with open(cmd_file, "r", encoding="utf-8") as f:
+                cmd = json.load(f)
+            os.remove(cmd_file)
+        except Exception:
+            return
+
+        cmd_id = cmd.get("id", "")
+        action = cmd.get("action", "")
+        params = cmd.get("params", {})
+        result = {"id": cmd_id, "status": "error", "message": "未知操作"}
+
+        try:
+            if action == "add_widget":
+                result = self._cmd_add_widget(params)
+            elif action == "delete_widget":
+                result = self._cmd_delete_widget(params)
+            elif action == "move_widget":
+                result = self._cmd_move_widget(params)
+            elif action == "resize_widget":
+                result = self._cmd_resize_widget(params)
+            elif action == "set_property":
+                result = self._cmd_set_property(params)
+            elif action == "capture":
+                result = self._cmd_capture(params)
+            elif action == "new_project":
+                result = self._cmd_new_project(params)
+            elif action == "set_canvas_size":
+                result = self._cmd_set_canvas_size(params)
+            elif action == "save":
+                result = self._cmd_save(params)
+            elif action == "get_canvas_info":
+                result = self._cmd_get_canvas_info(params)
+            elif action == "set_canvas_bg":
+                bg_path = params.get("path", "")
+                if bg_path and os.path.exists(bg_path):
+                    self.canvas.set_canvas_background(bg_path)
+                    self.canvas._canvas_bg_scale = params.get("scale", "fit")
+                    self.canvas._canvas_bg_opacity = params.get("opacity", 100)
+                    self.statusBar().showMessage(f"✅ 画布背景已设置: {os.path.basename(bg_path)}")
+                    result = {"id": cmd_id, "status": "ok", "message": f"画布背景已设置"}
+                else:
+                    self.canvas.clear_canvas_background()
+                    self.statusBar().showMessage("画布背景已清除")
+                    result = {"id": cmd_id, "status": "ok", "message": "画布背景已清除"}
+            elif action == "clear_canvas_bg":
+                self.canvas.clear_canvas_background()
+                self.statusBar().showMessage("画布背景已清除")
+                result = {"id": cmd_id, "status": "ok", "message": "画布背景已清除"}
+            else:
+                result = {"id": cmd_id, "status": "error", "message": f"未知动作: {action}"}
+        except Exception as e:
+            import traceback as _tb
+            _tb.print_exc()
+            result = {"id": cmd_id, "status": "error", "message": str(e)[:200]}
+
+        # 写响应文件
+        try:
+            with open(self.MCP_RESPONSE_FILE, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _find_widget_by_name(self, name):
+        """通过 objectName 查找画布上的控件"""
+        for w in self.canvas._canvas_widgets:
+            if w.objectName() == name:
+                return w
+        return None
+
+    def _find_widgets_by_text(self, text):
+        """通过 text/title 模糊匹配控件"""
+        matches = []
+        for w in self.canvas._canvas_widgets:
+            t = ""
+            if hasattr(w, "text"): t = w.text()
+            elif hasattr(w, "title"): t = w.title()
+            if text in t:
+                matches.append(w)
+        return matches
+
+    def _cmd_new_project(self, params):
+        """新建项目：清空画布所有控件，重置为默认尺寸"""
+        self.canvas.clear_canvas()
+        self.canvas.history.undo_stack.clear()
+        self.canvas.history.redo_stack.clear()
+        self._current_file = None
+        # 重置页面标签（QTabBar 没有 clear()，逐个移除）
+        self.page_tabs.blockSignals(True)
+        while self.page_tabs.count() > 0:
+            self.page_tabs.removeTab(0)
+        self.page_tabs.addTab("页面1")
+        self.page_tabs.blockSignals(False)
+        self.canvas.widget_modified.emit()
+        self.canvas.update()
+        self.setWindowTitle("Mini Designer v20")
+        return {"id": "", "status": "ok", "message": "已新建空白项目"}
+
+    def _cmd_set_canvas_size(self, params):
+        """设置画布尺寸"""
+        w = params.get("w", params.get("width", 800))
+        h = params.get("h", params.get("height", 600))
+        self.canvas.set_canvas_size(w, h)
+        self.canvas.widget_modified.emit()
+        self.canvas.update()
+        return {"id": "", "status": "ok", "message": f"画布尺寸已设为 {w}x{h}"}
+
+    def _cmd_add_widget(self, params):
+        """添加控件 — 支持通过 type/display_name 指定控件类型"""
+        widget_type = params.get("widget_type") or params.get("display_name") or "按钮"
+        x = params.get("x", 100)
+        y = params.get("y", 100)
+        w = params.get("w")
+        h = params.get("h")
+        text = params.get("text")
+        role = params.get("role")
+        tag = params.get("tag")
+
+        pos = QPoint(x, y)
+        widget = self.canvas._create_widget_internal(widget_type, pos, center=False)
+        if widget is None:
+            return {"id": "", "status": "error", "message": f"无法创建控件 '{widget_type}'，请确认类型名称正确"}
+
+        if w is not None and h is not None:
+            widget.resize(w, h)
+        if text:
+            if hasattr(widget, "setText"):
+                widget.setText(text)
+            elif hasattr(widget, "setTitle"):
+                widget.setTitle(text)
+        if role:
+            widget.setProperty("role", role)
+            widget.style().unpolish(widget)
+            widget.style().polish(widget)
+        if tag:
+            widget.setProperty("_tag", tag)
+
+        self.canvas.widget_modified.emit()
+        self.canvas.update()
+        # 自动保存到默认路径
+        self._auto_save()
+        return {
+            "id": "", "status": "ok",
+            "message": f"已添加 {widget_type}: {widget.objectName()}",
+            "widget": {
+                "objectName": widget.objectName(),
+                "type": widget_type,
+                "x": widget.x(), "y": widget.y(),
+                "w": widget.width(), "h": widget.height(),
+                "text": text or ""
+            }
+        }
+
+    def _cmd_delete_widget(self, params):
+        """删除控件"""
+        name = params.get("name") or params.get("objectName", "")
+        widget = self._find_widget_by_name(name)
+        if widget is None:
+            return {"id": "", "status": "error", "message": f"未找到控件 '{name}'"}
+        self.canvas.history.push(DeleteWidgetCmd(self.canvas, widget))
+        self.canvas.widget_modified.emit()
+        self.canvas.update()
+        self._auto_save()
+        return {"id": "", "status": "ok", "message": f"已删除 {name}"}
+
+    def _cmd_move_widget(self, params):
+        name = params.get("name") or params.get("objectName", "")
+        x = params.get("x")
+        y = params.get("y")
+        widget = self._find_widget_by_name(name)
+        if widget is None:
+            return {"id": "", "status": "error", "message": f"未找到控件 '{name}'"}
+        if x is not None and y is not None:
+            old_pos = widget.pos()
+            new_pos = QPoint(x, y)
+            self.canvas.history.push(MoveWidgetCmd(self.canvas, widget, old_pos, new_pos))
+            widget.move(new_pos)
+            self.canvas.widget_modified.emit()
+            self.canvas.update()
+            self._auto_save()
+        return {"id": "", "status": "ok", "message": f"已移动 {name} 到 ({widget.x()}, {widget.y()})"}
+
+    def _cmd_resize_widget(self, params):
+        name = params.get("name") or params.get("objectName", "")
+        w = params.get("w")
+        h = params.get("h")
+        widget = self._find_widget_by_name(name)
+        if widget is None:
+            return {"id": "", "status": "error", "message": f"未找到控件 '{name}'"}
+        if w is not None and h is not None:
+            old_geo = widget.geometry()
+            new_geo = QRect(widget.x(), widget.y(), w, h)
+            self.canvas.history.push(ResizeWidgetCmd(self.canvas, widget, old_geo, new_geo))
+            widget.setGeometry(new_geo)
+            self.canvas.widget_modified.emit()
+            self.canvas.update()
+            self._auto_save()
+        return {"id": "", "status": "ok", "message": f"已调整 {name} 到 {w}x{h}"}
+
+    def _cmd_set_property(self, params):
+        name = params.get("name") or params.get("objectName", "")
+        prop = params.get("property") or params.get("prop", "")
+        value = params.get("value")
+        widget = self._find_widget_by_name(name)
+        if widget is None:
+            return {"id": "", "status": "error", "message": f"未找到控件 '{name}'"}
+        old_val = None
+        if prop == "text":
+            old_val = widget.text() if hasattr(widget, "text") else ""
+        elif prop == "x":
+            old_val = widget.x()
+        elif prop == "y":
+            old_val = widget.y()
+        elif prop == "w":
+            old_val = widget.width()
+        elif prop == "h":
+            old_val = widget.height()
+        self.canvas.history.push(PropertyChangeCmd(self.canvas, widget, prop, old_val, value))
+        self.canvas._apply_property(widget, prop, value)
+        self.canvas.widget_modified.emit()
+        self.canvas.update()
+        self._auto_save()
+        return {"id": "", "status": "ok", "message": f"已设置 {name}.{prop} = {value}"}
+
+    def _cmd_capture(self, params):
+        """截图：将当前画布渲染为 PNG 并保存"""
+        # 先确保界面更新完成
+        QApplication.processEvents()
+        QApplication.processEvents()
+        pixmap = self.canvas.grab()
+        pixmap.save(self.MCP_PREVIEW_FILE)
+        return {
+            "id": "", "status": "ok",
+            "message": f"截图已保存到 {self.MCP_PREVIEW_FILE}",
+            "file": self.MCP_PREVIEW_FILE,
+            "size": {"w": pixmap.width(), "h": pixmap.height()}
+        }
+
+    def _cmd_save(self, params):
+        """保存项目到默认路径"""
+        self._auto_save()
+        return {"id": "", "status": "ok", "message": f"已保存到 {self._current_file or 'untitled.json'}"}
+
+    def _cmd_get_canvas_info(self, params):
+        """获取画布基本信息"""
+        widgets_info = []
+        for w in self.canvas._canvas_widgets:
+            info = {
+                "objectName": w.objectName(),
+                "display_name": w.property("_display_name") or "",
+                "x": w.x(), "y": w.y(), "w": w.width(), "h": w.height(),
+            }
+            if hasattr(w, "text") and not isinstance(w, QGroupBox):
+                info["text"] = w.text()
+            if hasattr(w, "title"):
+                info["title"] = w.title()
+            info["tag"] = w.property("_tag") or ""
+            info["role"] = w.property("role") or "default"
+            info["locked"] = bool(w.property("_locked"))
+            widgets_info.append(info)
+        return {
+            "id": "", "status": "ok",
+            "message": f"画布上有 {len(widgets_info)} 个控件",
+            "canvas": {
+                "width": self.canvas.design_width,
+                "height": self.canvas.design_height,
+                "widget_count": len(widgets_info),
+                "zoom": self.canvas._zoom_factor,
+                "grid": self.canvas._grid_enabled
+            },
+            "widgets": widgets_info
+        }
+
+    def _auto_save(self):
+        """自动保存到默认路径 _current_file 或 untitled.json"""
+        try:
+            path = self._current_file or "untitled.json"
+            self.canvas._deselect()
+            self.canvas._save_current_page()
+            QApplication.processEvents()
+            self.canvas.save_project(path)
+            self._current_file = path
+        except Exception:
+            pass  # 自动保存静默失败，不影响主流程
+
+
+# ═══════════════════════════════════════════════════════════════
 # 入口
 # ═══════════════════════════════════════════════════════════════
 def main():
